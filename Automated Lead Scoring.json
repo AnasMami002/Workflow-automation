@@ -1,0 +1,732 @@
+{
+  "name": "Automated Lead Scoring",
+  "nodes": [
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"email_clean\": \"{{ $json['Email Address'].toLowerCase().trim() }}\",\n  \"jobTitle_clean\": \"{{ $json['Job Title '].toLowerCase() }}\",\n  \"name_clean\": \"{{ $json.Name.toLowerCase() }}\"\n}\n",
+        "includeOtherFields": true,
+        "include": "selected",
+        "includeFields": "Timestamp, ['Company Name '], ['  Company Size  ']",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        48,
+        0
+      ],
+      "id": "afb314c1-7c8f-473b-9f27-c01ded7fa274",
+      "name": "Lead Data Normalization"
+    },
+    {
+      "parameters": {
+        "jsCode": "for (const item of $input.all()) {\n  const data = item.json;\n  \n  // 1. SMART KEY LOOKUP: This finds the value even if there are hidden spaces\n  const getVal = (searchStr) => {\n    const key = Object.keys(data).find(k => k.toLowerCase().includes(searchStr.toLowerCase()));\n    return (data[key] || \"\").toString().trim();\n  };\n\n  const jobTitle = getVal(\"jobTitle_clean\").toLowerCase();\n  const companySize = getVal(\"Company Size\");\n  \n  let score = 0;\n  let reasons = [];\n\n  // 2. Score based on Job Title\n  if (jobTitle.includes('ceo') || jobTitle.includes('founder') || jobTitle.includes('owner')) {\n    score += 50;\n    reasons.push(\"Decision Maker Title\");\n  } else if (jobTitle.includes('manager') || jobTitle.includes('head') || jobTitle.includes('director')) {\n    score += 30;\n    reasons.push(\"Management Title\");\n  }\n\n  // 3. Score based on Company Size (Targeting 51-200 and 201-500)\n  if (companySize.includes('51-200') || companySize.includes('201-500') || companySize.includes('500+')) {\n    score += 40;\n    reasons.push(\"Target Company Size (\" + companySize + \")\");\n  } else if (companySize.includes('11-50')) {\n    score += 20;\n    reasons.push(\"Growth Stage Company\");\n  } else {\n    score += 5;\n    reasons.push(\"Small/Startup Size (\" + companySize + \")\");\n  }\n\n  // 4. Determine Lead Temperature\n  if (score >= 70) {\n    data.leadStatus = 'Hot';\n    data.statusTag = '🔥 Hot';\n  } else if (score >= 35) {\n    data.leadStatus = 'Warm';\n    data.statusTag = '☀️ Warm';\n  } else {\n    data.leadStatus = 'Cold';\n    data.statusTag = '❄️ Cold';\n  }\n\n  data.leadScore = score;\n  data.scoringReasons = reasons.join(', ');\n}\n\nreturn $input.all();\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        0
+      ],
+      "id": "d8f4e6dd-9bda-4a07-9ed3-75ab55f1c29c",
+      "name": "JS: Proprietary Scoring Engine"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.leadStatus }}",
+                    "rightValue": "Hot",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "95aefba2-f9fd-4727-aaef-9dc442c5861f"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Hot Lead"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "8aa020ec-803e-465f-80fa-fe2027bed969",
+                    "leftValue": "={{ $json.leadStatus }}",
+                    "rightValue": "Warm",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Warm Lead"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "143fe556-37d4-4550-aed9-d48f5d448953",
+                    "leftValue": "={{ $json.leadStatus }}",
+                    "rightValue": "Cold",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Cold Lead"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        496,
+        -16
+      ],
+      "id": "d748a540-30c4-4c7b-a57a-82b47c23acf9",
+      "name": "Router: Lead Temperature"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1CCgxWzW12Cg2OwlrnMJVEGnApR-1sYoyztgoGxmCVew",
+          "mode": "list",
+          "cachedResultName": "B2B Leads Scored",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1CCgxWzW12Cg2OwlrnMJVEGnApR-1sYoyztgoGxmCVew/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1CCgxWzW12Cg2OwlrnMJVEGnApR-1sYoyztgoGxmCVew/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $json.Timestamp }}",
+            "Company": "={{ $json[\"Company Name \"] }}",
+            "Company Size": "={{ $json[\"  Company Size  \"] }}",
+            "Lead Score": "={{ $json.leadScore }}",
+            "Job Title": "={{ $json.jobTitle_clean }}",
+            "Lead Status": "=HOT (Priority)",
+            "Scoring Reasons": "=Decision makers at mid-to-large companies.",
+            "Email": "={{ $json.email_clean }}",
+            "Name": "={{ $json.name_clean }}"
+          },
+          "matchingColumns": [
+            "Name"
+          ],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company",
+              "displayName": "Company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company Size",
+              "displayName": "Company Size",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Job Title",
+              "displayName": "Job Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead Score",
+              "displayName": "Lead Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead Status",
+              "displayName": "Lead Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Scoring Reasons",
+              "displayName": "Scoring Reasons",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        720,
+        -192
+      ],
+      "id": "997b2880-27ef-4087-b825-0ea5bf5835fb",
+      "name": "Sheets: Sync Hot Opportunities",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "OZMXc6xYEU0Dj7zx",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1CCgxWzW12Cg2OwlrnMJVEGnApR-1sYoyztgoGxmCVew",
+          "mode": "list",
+          "cachedResultName": "B2B Leads Scored",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1CCgxWzW12Cg2OwlrnMJVEGnApR-1sYoyztgoGxmCVew/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1CCgxWzW12Cg2OwlrnMJVEGnApR-1sYoyztgoGxmCVew/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $json.Timestamp }}",
+            "Company": "={{ $json[\"Company Name \"] }}",
+            "Company Size": "={{ $json[\"  Company Size  \"] }}",
+            "Lead Score": "={{ $json.leadScore }}",
+            "Job Title": "={{ $json.jobTitle_clean }}",
+            "Lead Status": "=WARM (Nurture)",
+            "Scoring Reasons": "=Managers at large companies OR Founders at tiny startups",
+            "Email": "={{ $json.email_clean }}",
+            "Name": "={{ $json.name_clean }}"
+          },
+          "matchingColumns": [
+            "Name"
+          ],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company",
+              "displayName": "Company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company Size",
+              "displayName": "Company Size",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Job Title",
+              "displayName": "Job Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead Score",
+              "displayName": "Lead Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead Status",
+              "displayName": "Lead Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Scoring Reasons",
+              "displayName": "Scoring Reasons",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        720,
+        0
+      ],
+      "id": "c20abba0-f635-4d0b-9f3a-1ef4272af55b",
+      "name": "Sheets: Update Warm Nurture Queue",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "OZMXc6xYEU0Dj7zx",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1CCgxWzW12Cg2OwlrnMJVEGnApR-1sYoyztgoGxmCVew",
+          "mode": "list",
+          "cachedResultName": "B2B Leads Scored",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1CCgxWzW12Cg2OwlrnMJVEGnApR-1sYoyztgoGxmCVew/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1CCgxWzW12Cg2OwlrnMJVEGnApR-1sYoyztgoGxmCVew/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ $json.Timestamp }}",
+            "Company": "={{ $json[\"Company Name \"] }}",
+            "Company Size": "={{ $json[\"  Company Size  \"] }}",
+            "Lead Score": "={{ $json.leadScore }}",
+            "Job Title": "={{ $json.jobTitle_clean }}",
+            "Lead Status": "=COLD (Archive)",
+            "Scoring Reasons": "=Low-level titles or very small companies",
+            "Email": "={{ $json.email_clean }}",
+            "Name": "={{ $json.name_clean }}"
+          },
+          "matchingColumns": [
+            "Name"
+          ],
+          "schema": [
+            {
+              "id": "Timestamp",
+              "displayName": "Timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company",
+              "displayName": "Company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company Size",
+              "displayName": "Company Size",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Job Title",
+              "displayName": "Job Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead Score",
+              "displayName": "Lead Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead Status",
+              "displayName": "Lead Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Scoring Reasons",
+              "displayName": "Scoring Reasons",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        720,
+        192
+      ],
+      "id": "bc968137-4e1c-4428-94dc-32daf73c2720",
+      "name": "Sheets: Archive Disqualified Leads",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "OZMXc6xYEU0Dj7zx",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "1JOSMFYwln8TD9VFdLPOMf6Z9TonRPR5xcJ_piP9laKI",
+          "mode": "list",
+          "cachedResultName": "Contact Information (Responses)",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1JOSMFYwln8TD9VFdLPOMf6Z9TonRPR5xcJ_piP9laKI/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1090683266,
+          "mode": "list",
+          "cachedResultName": "Form Responses 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1JOSMFYwln8TD9VFdLPOMf6Z9TonRPR5xcJ_piP9laKI/edit#gid=1090683266"
+        },
+        "event": "rowAdded",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        0
+      ],
+      "id": "608b8a50-2ac8-4721-a676-b6043335061b",
+      "name": "Trigger: New Lead Inbound",
+      "credentials": {
+        "googleSheetsTriggerOAuth2Api": {
+          "id": "KozeBQcosswyqemQ",
+          "name": "Google Sheets Trigger account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#lead-scoring",
+          "mode": "name"
+        },
+        "text": "=🚨 NEW HOT LEAD - Action Required Within 15 Mins\nProspect Name: {{ $json.Name }}\n\nCompany: {{ $json.Company }}\n\nJob Title: {{ $json[\"Job Title\"] }}\n\nLink to Leads Spreadsheet: https://docs.google.com/spreadsheets/d/1CCgxWzW12Cg2OwlrnMJVEGnApR-1sYoyztgoGxmCVew/edit?usp=sharing",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        944,
+        -192
+      ],
+      "id": "db4cd05f-74ee-485c-806b-d59c6ac7d922",
+      "name": "Slack: Real-Time High-Priority Alert",
+      "webhookId": "50d91443-8a7d-4037-ae39-aeac525b261a",
+      "credentials": {
+        "slackApi": {
+          "id": "oMzp3j0yz60CAj3f",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#lead-scoring",
+          "mode": "name"
+        },
+        "text": "=Headline: 📧 New Warm Lead Added to Queue\n\nProspect Name: {{ $json.Name }}\n\nCompany: {{ $json.Company }}\n\nJob Title: {{ $json[\"Job Title\"] }}\n\nAction: Add to \"Warm Outreach\" sequence.\n\nLink to Leads Spreadsheet: https://docs.google.com/spreadsheets/d/1CCgxWzW12Cg2OwlrnMJVEGnApR-1sYoyztgoGxmCVew/edit?usp=sharing",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.4,
+      "position": [
+        944,
+        0
+      ],
+      "id": "d3221270-c339-4ac3-a3e9-89d7fc8ecee3",
+      "name": "Slack: Daily Warm Lead Digest",
+      "webhookId": "50d91443-8a7d-4037-ae39-aeac525b261a",
+      "credentials": {
+        "slackApi": {
+          "id": "oMzp3j0yz60CAj3f",
+          "name": "Slack account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Lead Data Normalization": {
+      "main": [
+        [
+          {
+            "node": "JS: Proprietary Scoring Engine",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JS: Proprietary Scoring Engine": {
+      "main": [
+        [
+          {
+            "node": "Router: Lead Temperature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Router: Lead Temperature": {
+      "main": [
+        [
+          {
+            "node": "Sheets: Sync Hot Opportunities",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheets: Update Warm Nurture Queue",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sheets: Archive Disqualified Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Sync Hot Opportunities": {
+      "main": [
+        [
+          {
+            "node": "Slack: Real-Time High-Priority Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheets: Update Warm Nurture Queue": {
+      "main": [
+        [
+          {
+            "node": "Slack: Daily Warm Lead Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger: New Lead Inbound": {
+      "main": [
+        [
+          {
+            "node": "Lead Data Normalization",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "8f2338ff-1270-4ed1-8631-a735395be93e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "59fffa74ea3f3d10a87c22580b9e15e0f1129688a54b151865150750dacac42f"
+  },
+  "id": "JyeqZpKiwKSIKCeSBTROS",
+  "tags": []
+}
